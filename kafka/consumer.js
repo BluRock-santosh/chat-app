@@ -1,18 +1,46 @@
-import { kafkaClient } from "../services/kafkaClient.js";
+import { Kafka } from "kafkajs";
+import dotenv from "dotenv";
+dotenv.config();
 
-const consumer = kafkaClient.consumer({
-  groupId: process.env.KAFKA_GROUP_ID || "websocket-group",
+const kafka = new Kafka({
+  clientId: "chat-app",
+  brokers: [process.env.KAFKA_BROKER],
+  retry: {
+    initialRetryTime: 100,
+    retries: 8
+  },
+  connectionTimeout: 3000
 });
 
-const kafkaConsumer = async (topic, handleMessage) => {
-  await consumer.connect();
-  await consumer.subscribe({ topic, fromBeginning: true });
+const consumer = kafka.consumer({ groupId: "chat-group" });
 
-  consumer.run({
-    eachMessage: async ({ topic, message, partition }) => {
-      console.log(`🔄 Received message from "${topic}":`, msg);
-    },
-  });
-};
+async function kafkaConsumer() {
+  try {
+    console.log("Connecting to Kafka consumer...");
+    await consumer.connect();
+    console.log("✅ Kafka consumer connected successfully");
+
+    await consumer.subscribe({ topic: "chat-messages", fromBeginning: true });
+    console.log("✅ Subscribed to chat-messages topic");
+
+    await consumer.run({
+      eachMessage: async ({ topic, partition, message }) => {
+        try {
+          console.log({
+            topic,
+            partition,
+            offset: message.offset,
+            value: message.value.toString(),
+          });
+        } catch (error) {
+          console.error("Error processing message:", error);
+        }
+      },
+    });
+  } catch (error) {
+    console.error("❌ Kafka consumer error:", error);
+    throw error;
+  }
+}
 
 export default kafkaConsumer;

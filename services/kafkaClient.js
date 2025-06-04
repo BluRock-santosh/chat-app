@@ -1,10 +1,10 @@
 import { Kafka } from "kafkajs";
 
-export  const kafkaClient = new Kafka({
+export const kafkaClient = new Kafka({
     clientId: "websocket-server",
-    brokers: ["broker:9092"], 
+    brokers: [process.env.KAFKA_BROKER || "localhost:9094"],
     connectionTimeout: 5000,
     retry: { retries: 5 }
-  });
+});
 
 

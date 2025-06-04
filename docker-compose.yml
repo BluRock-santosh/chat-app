@@ -1,5 +1,8 @@
+version: '3.8'
+
 networks:
   mynetwork:
+    driver: bridge
 
 services:
   zookeeper:
@@ -10,32 +13,46 @@ services:
       - "2181:2181"
     networks:
       - mynetwork
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc localhost 2181 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    stop_grace_period: 30s
 
   kafka:
+    hostname: kafka
     image: wurstmeister/kafka
-    container_name: broker
+    container_name: kafka
     restart: always
     ports:
       - "9092:9092"
+      - "9094:9094"
     environment:
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:9092
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_BROKER_ID: 1
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9094
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:9094
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      DOCKER_API_VERSION: 1.22
-      KAFKA_ADVERTISED_HOST_NAME: broker
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 300000
+      KAFKA_SHUTDOWN_TIMEOUT_MS: 30000
     depends_on:
       zookeeper:
-        condition: service_started
+        condition: service_healthy
     networks:
       - mynetwork
     healthcheck:
-      test: ["CMD", "kafka-topics.sh", "--list", "--bootstrap-server", "broker:9092"]
+      test: ["CMD-SHELL", "kafka-topics.sh --list --bootstrap-server kafka:9092"]
       interval: 10s
+      timeout: 5s
       retries: 5
       start_period: 20s
+    stop_grace_period: 30s
 
   redis:
     image: redis:latest
@@ -48,24 +65,65 @@ services:
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
+      timeout: 5s
       retries: 5
       start_period: 5s
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    stop_grace_period: 30s
+
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    networks:
+      - mynetwork
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - mongodb_data:/data/db
+    command: mongod --quiet --logpath=/dev/null
+    stop_grace_period: 30s
 
   websocket-server:
     build: .
     container_name: websocket-server
     restart: always
     ports:
-      - "8081:8080"
+      - "3000:3000"
+      - "8080:8080"
     depends_on:
+      mongodb:
+        condition: service_healthy
       redis:
         condition: service_healthy
       kafka:
-        condition: service_started
+        condition: service_healthy
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - KAFKA_BROKER=broker:9092
-      - DB_URI=${DB_URI}
+      - KAFKA_BROKER=kafka:9092
+      - KAFKA_GROUP_ID=websocket-group
+      - DB_URI=mongodb://mongodb:27017/chat-app
+      - PORT=3000
+      - NODE_ENV=production
     networks:
       - mynetwork
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    stop_grace_period: 30s
+
+volumes:
+  mongodb_data:
+  redis_data:

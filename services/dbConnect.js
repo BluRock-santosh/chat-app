@@ -1,24 +1,43 @@
 import mongoose from "mongoose";
-import { config } from "dotenv";
-config();
+import dotenv from "dotenv";
+dotenv.config();
 
-const uri = process.env.DB_URI;
-
-const clientOptions = {
-  serverApi: { version: "1", strict: true, deprecationErrors: true },
-};
-
-async function run() {
+async function connectMongo() {
   try {
-    await mongoose.connect(uri, clientOptions);
+    console.log("Connecting to MongoDB...");
+    const options = {
+    
+   
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+    };
 
-    await mongoose.connection.db.admin().command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!"
-    );
-  } catch (err) {
-    console.error("An error occurred:", err); 
+    await mongoose.connect(process.env.DB_URI, options);
+    console.log("✅ MongoDB connected successfully");
+
+    mongoose.connection.on("error", (err) => {
+      console.error("❌ MongoDB connection error:", err);
+    });
+
+    mongoose.connection.on("disconnected", () => {
+      console.log("⚠️ MongoDB disconnected");
+    });
+
+    process.on("SIGINT", async () => {
+      try {
+        await mongoose.connection.close();
+        console.log("✅ MongoDB connection closed through app termination");
+        process.exit(0);
+      } catch (err) {
+        console.error("❌ Error closing MongoDB connection:", err);
+        process.exit(1);
+      }
+    });
+
+  } catch (error) {
+    console.error("❌ MongoDB connection error:", error);
+    throw error;
   }
 }
 
-export default run;
+export default connectMongo;
